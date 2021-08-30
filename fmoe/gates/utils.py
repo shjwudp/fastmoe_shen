@@ -13,14 +13,19 @@ def limit_by_capacity(topk_idx, num_expert, world_size, capacity):
 
         pos, lec, gec = count_by_gate(topk_idx, num_expert, world_size,
                 require_pos=False)
+        # if torch.distributed.get_rank()==0:
+        #     print("in limit_by_capacity:begin limit_by_capacity")
         new_gec = fmoe_native.limit_by_capacity(gec, capacity,
                 num_expert, world_size)
+        # if torch.distributed.get_rank()==0:
+        #     print("in limit_by_capacity:begin expert_exchange")
         if world_size > 1:
             new_lec = fmoe_native.expert_exchange(new_gec, num_expert,
                     world_size)
         else:
             new_lec = new_gec
-
+        # if torch.distributed.get_rank()==0:
+        #     print("in limit_by_capacity:begin prune_gate_by_capacity")
         topk_idx = fmoe_native.prune_gate_by_capacity(topk_idx,
                 new_lec.to(torch.int32), num_expert, world_size)
     return new_lec, new_gec, topk_idx

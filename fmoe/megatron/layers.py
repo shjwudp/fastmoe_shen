@@ -151,6 +151,7 @@ def fmoefy(
     distributed_experts=True,
     hidden_hidden_size=None,
     top_k=None,
+    skip_layer_dist=None
 ):
     r"""
     Replace MLP layers in a transformer-based model in Megatron by MoE.
@@ -206,8 +207,13 @@ def fmoefy(
             if args.rank in ranks:
                 moe_group = group
         set_moe_group(moe_group)
-    for idx, l in enumerate(model.language_model.transformer.layers):
-        l.mlp = MegatronMLP(args, mp_group, moe_group, idx)
+    if skip_layer_dist is None:
+        for idx, l in enumerate(model.language_model.transformer.layers):
+            l.mlp = MegatronMLP(args, mp_group, moe_group, idx)
+    else:
+        for idx, l in enumerate(model.language_model.transformer.layers):
+            if idx % skip_layer_dist==0:
+                l.mlp = MegatronMLP(args, mp_group, moe_group, idx)
 
     # initialize gate hook
     num_layers = len(model.language_model.transformer.layers)

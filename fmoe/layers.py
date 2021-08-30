@@ -217,7 +217,6 @@ class FMoE(nn.Module):
             inp = Slice.apply(inp, self.mp_rank, self.mp_size, self.mp_group)
 
         gate_top_k_idx, gate_score = self.gate(inp)
-
         if self.gate_hook is not None:
             self.gate_hook(gate_top_k_idx, gate_score, None)
 
@@ -232,6 +231,8 @@ class FMoE(nn.Module):
             inp, gate_top_k_idx,
             self.expert_fn, self.num_expert, self.world_size
         )
+        # if torch.distributed.get_rank()==0:
+        #     print("_fmoe_general_global_forward",fwd.shape,torch.sum(fwd))
 
         # recover deleted tensors
         if self.mask is not None and self.mask_dict is not None:
@@ -248,7 +249,17 @@ class FMoE(nn.Module):
 
         gate_score = gate_score.view(x.shape[0], 1, self.top_k)
         x = torch.bmm(gate_score, x).reshape(-1, self.d_model)
+        # if torch.distributed.get_rank()==0:
+        #     print("after bmm,",x.shape,torch.max(x[8758]))
 
         if self.mp_size > 1:
             x = AllGather.apply(x, self.mp_rank, self.mp_size, self.mp_group)
+        
+        # if torch.distributed.get_rank()==0:
+        # #     # for i in range(x.shape[0]):
+        # #     #     print(torch.sum(x[i]),gate_top_k_idx[i])
+        #     print("FMoE",x.shape,torch.sum(x))
+        #     torch.save(x,"/hetu_group/shendong/torch_0.pt")
+            # print(x.shape)
+        # quit()
         return x

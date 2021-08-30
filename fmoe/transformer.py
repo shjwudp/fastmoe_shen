@@ -78,4 +78,6 @@ class FMoETransformerMLP(FMoE):
         original_shape = inp.shape
         inp = inp.reshape(-1, self.d_model)
         output = super().forward(inp)
+        # if torch.distributed.get_rank()==0:
+        #     print("model/origin shape:", self.d_model,original_shape)
         return output.reshape(original_shape)

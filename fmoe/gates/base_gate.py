@@ -2,15 +2,18 @@ r"""
 Base gate with standard interface
 """
 import torch.nn as nn
-
+import torch
 
 class BaseGate(nn.Module):
-    def __init__(self, num_expert, world_size):
+    def __init__(self, num_expert, world_size, exchange_outnode=False):
         super().__init__()
         self.world_size = world_size
         self.num_expert = num_expert
         self.tot_expert = world_size * num_expert
+        self.node_idx  = torch.distributed.get_rank()
         self.loss = None
+        self.exchange_outnode = exchange_outnode
+
 
     def forward(self, x):
         raise NotImplementedError('Base gate cannot be directly used for fwd')

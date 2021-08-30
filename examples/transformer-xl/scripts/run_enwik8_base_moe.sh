@@ -4,7 +4,7 @@ if [[ $1 == 'train' ]]; then
     echo 'Run training...'
     python train.py \
         --cuda \
-        --data ../data/enwik8/ \
+        --data ./data/enwik8/ \
         --dataset enwik8 \
         --n_layer 12 \
         --d_model 512 \

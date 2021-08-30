@@ -123,11 +123,16 @@ def patch_model_provider(model_provider):
     def fmoefied_model_provider():
         from .layers import fmoefy
         args = get_args()
+        if args.expert_hidden_size is None:
+            expert_hidden_size = 4 * args.hidden_size // args.top_k
+        else:
+            expert_hidden_size = args.expert_hidden_size
         return fmoefy(
             model_provider(),
             num_experts=args.num_experts,
-            hidden_hidden_size=4 * args.hidden_size // args.top_k,
+            hidden_hidden_size=expert_hidden_size,
             top_k=args.top_k,
+            skip_layer_dist = args.skip_layer_dist
         )
 
     return fmoefied_model_provider
