@@ -72,6 +72,10 @@ def add_balance_log(model, writer, iteration):
                 iteration,
             )
 
+# def get_gate_
+
+# def get_gate_
+
 
 def patch_forward_step(forward_step_func):
     r"""

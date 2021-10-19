@@ -10,11 +10,14 @@ from .utils import limit_by_capacity
 
 class GShardGate(NaiveGate):
     def __init__(self, d_model, num_expert, world_size,
-            topk=2, capacity=(1.2, 2.4), random_routing=True):
+            topk=2, capacity=(1.2, 2.4), random_routing=True,gate_all_comm=True, inner_gpu_cnt=4,save=False,layer_idx=-1,loss_k=1):
         assert topk == 2, 'topk should be 2 in gshard'
-        super().__init__(d_model, num_expert, world_size, top_k=2)
+        super().__init__(d_model, num_expert, world_size, top_k=2,layer_idx=layer_idx)
         self.capacity = capacity
         self.random_routing = True
+        # self.k = loss_k
+        self.k=50
+        print("loss k is:",self.k)
 
     def forward(self, x):
         naive_outs = super().forward(x, return_all_scores=True)
@@ -31,7 +34,13 @@ class GShardGate(NaiveGate):
                 ) / S
         m_e = torch.mean(F.softmax(gate_score, dim=1), dim=0)
         loss = torch.mean(c_e * m_e) * (self.num_expert ** 2)
-        self.set_loss(loss)
+        self.set_loss(loss*self.k)
+
+        # fix gshard bug
+        # if self.random_routing:
+        #     rand_routing_prob = torch.rand(gate_score.size(0), device=x.device)
+        #     mask = (2 * topk_val[:, 1] < rand_routing_prob)
+        #     topk_idx[:, 1].masked_fill_(mask, -1)
 
         cap_rate = self.capacity[0 if self.training else 1]
         capacity = math.ceil(cap_rate * x.shape[0])

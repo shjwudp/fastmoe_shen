@@ -24,5 +24,8 @@ def update_balance_profile(
     num_expert,
     balance_strategy,
 ):
+
+    # print(gate_top_k_idx,_gate_score_top_k,layer_idx,num_expert,balance_strategy)
+    # quit()
     # Fill in this function to conduct balance related jobs
     pass

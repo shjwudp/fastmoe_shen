@@ -75,7 +75,7 @@ class MegatronMLP(FMoETransformerMLP):
     communication group `group` to replace the original MLP layer in Megatron.
     """
 
-    def __init__(self, args, mp_group, moe_group, layer_idx):
+    def __init__(self, args, mp_group, moe_group, layer_idx,gate_all_comm=True):
         assert (
             args.seq_length * args.micro_batch_size % args.tensor_model_parallel_size
             == 0
@@ -117,6 +117,8 @@ class MegatronMLP(FMoETransformerMLP):
                 layer_idx, args.num_experts * world_size
             ),
             gate=gate,
+            gate_all_comm=gate_all_comm,
+            layer_idx=layer_idx
         )
         self.hidden_size = args.hidden_size
         if args.distributed_experts:
@@ -151,7 +153,7 @@ def fmoefy(
     distributed_experts=True,
     hidden_hidden_size=None,
     top_k=None,
-    skip_layer_dist=None
+    skip_layer_dist=None,
 ):
     r"""
     Replace MLP layers in a transformer-based model in Megatron by MoE.
@@ -169,6 +171,7 @@ def fmoefy(
     """
     from megatron import get_args
     from megatron import mpu
+    from megatron import print_rank_0
 
     args = get_args()
     if num_experts is not None:
@@ -207,14 +210,28 @@ def fmoefy(
             if args.rank in ranks:
                 moe_group = group
         set_moe_group(moe_group)
+    
+    gate_all_com_list = len(model.language_model.transformer.layers)*[True] 
+    if args.all_comm_layer_dist is not None:
+        for idx in range(len(gate_all_com_list)):
+            if idx % args.all_comm_layer_dist != 0:
+                gate_all_com_list[idx]= False
+
+
     if skip_layer_dist is None:
         for idx, l in enumerate(model.language_model.transformer.layers):
-            l.mlp = MegatronMLP(args, mp_group, moe_group, idx)
+            # if idx==2:
+            #     l.mlp = MegatronMLP(args, mp_group, moe_group, idx,gate_all_comm=gate_all_com_list[idx])
+            # else:
+            #     l.mlp = MegatronMLP(args, mp_group, moe_group, idx,gate_all_comm=gate_all_com_list[idx])
+            l.mlp = MegatronMLP(args, mp_group, moe_group, idx,gate_all_comm=gate_all_com_list[idx])
+            print_rank_0(idx)
+            print_rank_0(l.mlp.gate.gate_all_comm)
+            print_rank_0("gatelog#######")
     else:
         for idx, l in enumerate(model.language_model.transformer.layers):
             if idx % skip_layer_dist==0:
-                l.mlp = MegatronMLP(args, mp_group, moe_group, idx)
-
+                l.mlp = MegatronMLP(args, mp_group, moe_group, idx,gate_all_comm=gate_all_com_list[idx])
     # initialize gate hook
     num_layers = len(model.language_model.transformer.layers)
     reset_gate_hook(num_layers)

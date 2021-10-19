@@ -52,6 +52,8 @@ class FMoETransformerMLP(FMoE):
         gate_hook=None,
         mask=None,
         mask_dict=None,
+        gate_all_comm=True,
+        layer_idx = -1
     ):
         super().__init__(
             num_expert=num_expert,
@@ -63,7 +65,9 @@ class FMoETransformerMLP(FMoE):
             moe_group=moe_group,
             gate_hook=gate_hook,
             mask=mask,
-            mask_dict=mask_dict
+            mask_dict=mask_dict,
+            gate_all_comm = gate_all_comm,
+            layer_idx=layer_idx
         )
         self.experts = _Expert(
             num_expert, d_model, d_hidden, activation, rank=self.mp_rank

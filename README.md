@@ -35,7 +35,7 @@ with your PyTorch's NCCL version, which can be inspected by running
 recommended, as the environment is well-setup there. Otherwise, you can access
 the [download link of all NCCL
 versions](https://developer.nvidia.com/nccl/nccl-legacy-downloads) to download
-the NCCL package that is suitable for you.
+the NCCL package that is suitable for you.****
 
 ## Usage 
 

@@ -145,6 +145,8 @@ class FMoE(nn.Module):
         gate_hook=None,
         mask=None,
         mask_dict=None,
+        gate_all_comm=True,
+        layer_idx = -1
     ):
         super().__init__()
         self.num_expert = num_expert
@@ -168,7 +170,10 @@ class FMoE(nn.Module):
             self.experts_fused = False
         else:
             self.experts_fused = True
-        self.gate = gate(d_model, num_expert, world_size, top_k)
+        
+        from megatron import get_args
+        args = get_args()
+        self.gate = gate(d_model, num_expert, world_size, top_k,gate_all_comm=gate_all_comm,inner_gpu_cnt=args.inner_gpu_cnt,layer_idx=layer_idx)
         self.gate_hook = gate_hook
         self.mask = mask
         self.mask_dict = mask_dict
