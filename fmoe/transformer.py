@@ -6,6 +6,20 @@ import torch.nn as nn
 from .gates import NaiveGate
 from .layers import FMoE, FMoELinear
 
+class MegatronBaseMLP(torch.nn.Module):
+    def __init__(self, hidden_size, activation=torch.nn.GELU()):
+        super(MegatronBaseMLP, self).__init__()
+
+        self.htoh4 = torch.nn.Linear(hidden_size, 2 * hidden_size)
+        self.activation = activation
+        self.h4toh = torch.nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, input):
+        x = self.htoh4(input)
+        x = self.activation(x)
+        x = self.h4toh(x)
+        return x
+
 
 class _Expert(nn.Module):
     r"""
@@ -63,15 +77,16 @@ class FMoETransformerMLP(FMoE):
             world_size=world_size,
             mp_group=mp_group,
             moe_group=moe_group,
+            expert=MegatronBaseMLP,
             gate_hook=gate_hook,
             mask=mask,
             mask_dict=mask_dict,
             gate_all_comm = gate_all_comm,
             layer_idx=layer_idx
         )
-        self.experts = _Expert(
-            num_expert, d_model, d_hidden, activation, rank=self.mp_rank
-        )
+        #self.experts = _Expert(
+        #    num_expert, d_model, d_hidden, activation, rank=self.mp_rank
+        #)
         self.mark_parallel_comm(expert_dp_comm)
 
     def forward(self, inp: torch.Tensor):
