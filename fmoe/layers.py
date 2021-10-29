@@ -72,6 +72,8 @@ def mark_module_parallel_comm(module, comm):
     """
     for p in module.parameters():
         setattr(p, "dp_comm", comm)
+        if comm == "none":
+            setattr(p, "expert", True)
 
 
 def _fmoe_general_global_forward(inp, gate, expert_fn, num_expert, world_size):
@@ -170,7 +172,7 @@ class FMoE(nn.Module):
             self.experts_fused = False
         else:
             self.experts_fused = True
-        
+
         from megatron import get_args
         args = get_args()
         self.gate = gate(d_model, num_expert, world_size, top_k,gate_all_comm=gate_all_comm,inner_gpu_cnt=args.inner_gpu_cnt,layer_idx=layer_idx)
@@ -259,7 +261,7 @@ class FMoE(nn.Module):
 
         if self.mp_size > 1:
             x = AllGather.apply(x, self.mp_rank, self.mp_size, self.mp_group)
-        
+
         # if torch.distributed.get_rank()==0:
         # #     # for i in range(x.shape[0]):
         # #     #     print(torch.sum(x[i]),gate_top_k_idx[i])
