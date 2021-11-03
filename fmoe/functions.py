@@ -51,7 +51,7 @@ def prepare_forward(gate, num_expert, world_size):
         world_size: number of workers that hold different experts.
         comm: the communicator of all workers in the expert-parallel group.
     """
-    pos, local_expert_count, global_expert_count = count_by_gate(gate, 
+    pos, local_expert_count, global_expert_count = count_by_gate(gate,
             num_expert, world_size)
     with torch.no_grad():
         fwd_expert_count = global_expert_count.view(world_size,
@@ -218,6 +218,17 @@ class MOEGather(Function):
                 fwd_batch_size,
                 world_size,
             )
+            exp_num = local_expert_count.shape[0] // world_size
+            cum = torch.cumsum(global_expert_count, dim=0)
+            idx_select = []
+            for i in range(exp_num):
+                for j in range(world_size):
+                    exp_idx = i + j * exp_num;
+                    bi = cum[(exp_idx - 1)].item() if exp_idx else 0
+                    ei = cum[exp_idx].item()
+                    idx_select.extend(list(range(bi, ei)))
+            idx_select = torch.as_tensor(idx_select, dtype=torch.int32, device=global_grad_out_buf.device)
+            global_grad_out_buf = _local_scatter(global_grad_out_buf, idx_select)
         else:
             global_grad_out_buf = grad_out_buf
         return global_grad_out_buf, None, None, None, None, None
