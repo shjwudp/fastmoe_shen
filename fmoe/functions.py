@@ -107,6 +107,17 @@ class MOEScatter(Function):
                 fwd_batch_size,
                 world_size,
             )
+            exp_num = local_expert_count.shape[0] // world_size
+            cum = torch.cumsum(global_expert_count, dim=0)
+            idx_select = []
+            for i in range(exp_num):
+                for j in range(world_size):
+                    exp_idx = i + j * exp_num;
+                    bi = cum[(exp_idx - 1)].item() if exp_idx else 0
+                    ei = cum[exp_idx].item()
+                    idx_select.extend(list(range(bi, ei)))
+            idx_select = torch.as_tensor(idx_select, dtype=torch.int32, device=global_input_buf.device)
+            global_input_buf = _local_scatter(global_input_buf, idx_select)
         else:
             global_input_buf = local_input_buf
         ctx.moe_args = inp.shape[0], pos.shape[0], world_size
