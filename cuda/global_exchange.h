@@ -36,40 +36,56 @@ void fmoe_cuda_global_scatter_impl(
     size_t in_feat, size_t n_expert, size_t world_size,
     CudaStreamManager* smgr) {
     // assert world_size > 1
-    int send_ptr = 0;
-    int recv_ptr = 0;
-
-    NCCL_SAFE_CALL(ncclGroupStart());
-    for (size_t i = 0; i < world_size; ++i) {
-      long local_expert_sum_count = 0;
-      long global_expert_sum_count = 0;
+    long*expert_ptr = new long[n_expert * world_size];
+    expert_ptr[0] = 0;
+    for (size_t i = 1; i < n_expert * world_size; ++i) {
+      expert_ptr[i] = expert_ptr[i - 1] + local_expert_count[i - 1];
+    }
+    long *recv_ptr = new long[world_size];
+    recv_ptr[0] = 0;
+    for (size_t i = 0; i < world_size - 1; ++i) {
+      recv_ptr[i + 1] = recv_ptr[i];
       for (size_t j = 0; j < n_expert; ++j) {
-        local_expert_sum_count += local_expert_count[i * n_expert + j];
-        global_expert_sum_count += global_expert_count[i * n_expert + j];
-      }
-      if (local_expert_sum_count) {
-        NCCL_SAFE_CALL(ncclSend(
-                local_input_buf + send_ptr * in_feat,
-                local_expert_sum_count * in_feat * sizeof(scalar_t),
-                ncclChar,
-                i,
-                smgr->ncclcomm,
-                smgr->stream(0)));
-        send_ptr += local_expert_sum_count;
-      }
-      if (global_expert_sum_count) {
-        NCCL_SAFE_CALL(ncclRecv(
-                input_buf + recv_ptr * in_feat,
-                global_expert_sum_count * in_feat * sizeof(scalar_t),
-                ncclChar,
-                i,
-                smgr->ncclcomm,
-                smgr->stream(0)));
-        recv_ptr += global_expert_sum_count;
+        recv_ptr[i + 1] += global_expert_count[i * n_expert + j];
       }
     }
-    NCCL_SAFE_CALL(ncclGroupEnd());
+
+    for (size_t i = 0; i < n_expert / 2; ++i) {
+      NCCL_SAFE_CALL(ncclGroupStart());
+      for (size_t j = 0; j < world_size; ++j) {
+        long local_expert_sum_count = 0;
+        long global_expert_sum_count = 0;
+        int idx = i * 2 + j * n_expert;
+
+        for (size_t k = 0; k < 2; ++k) {
+          local_expert_sum_count += local_expert_count[i * 2 + j * world_size + k];
+          global_expert_sum_count += global_expert_count[i * 2 + j * world_size + k];
+        }
+        if (local_expert_sum_count) {
+          NCCL_SAFE_CALL(ncclSend(
+                  local_input_buf + expert_ptr[idx] * in_feat,
+                  local_expert_sum_count * in_feat * sizeof(scalar_t),
+                  ncclChar,
+                  j,
+                  smgr->ncclcomm,
+                  smgr->stream(0)));
+        }
+        if (global_expert_sum_count) {
+          NCCL_SAFE_CALL(ncclRecv(
+                  input_buf + recv_ptr[j] * in_feat,
+                  global_expert_sum_count * in_feat * sizeof(scalar_t),
+                  ncclChar,
+                  j,
+                  smgr->ncclcomm,
+                  smgr->stream(0)));
+          recv_ptr[j] += global_expert_sum_count;
+        }
+      }
+      NCCL_SAFE_CALL(ncclGroupEnd());
+    }
     smgr->sync(1);
+    delete [] expert_ptr;
+    delete [] recv_ptr;
 }
 
 template<typename scalar_t>
