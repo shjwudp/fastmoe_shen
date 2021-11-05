@@ -58,8 +58,8 @@ void fmoe_cuda_global_scatter_impl(
         int idx = i * 2 + j * n_expert;
 
         for (size_t k = 0; k < 2; ++k) {
-          local_expert_sum_count += local_expert_count[i * 2 + j * world_size + k];
-          global_expert_sum_count += global_expert_count[i * 2 + j * world_size + k];
+          local_expert_sum_count += local_expert_count[i * 2 + j * n_expert + k];
+          global_expert_sum_count += global_expert_count[i * 2 + j * n_expert + k];
         }
         if (local_expert_sum_count) {
           NCCL_SAFE_CALL(ncclSend(
