@@ -3,8 +3,8 @@
 #include <cuda.h>
 
 __global__
-void limit_by_capacity_kernel(const long* ec, int* cap, long* eca,
-        const long n_expert, const long n_worker) {
+void limit_by_capacity_kernel(const int* ec, int* cap, int* eca,
+        const int n_expert, const int n_worker) {
     int eid = blockIdx.y;
     int wid = blockIdx.x * blockDim.x + threadIdx.x;
     if (wid < n_worker) {
@@ -20,8 +20,8 @@ void limit_by_capacity_kernel(const long* ec, int* cap, long* eca,
     }
 }
 
-void fmoe_cuda_limit_by_capacity_impl(const long* ec, int* cap,
-        long* eca, const long n_expert, const long n_worker,
+void fmoe_cuda_limit_by_capacity_impl(const int* ec, int* cap,
+        int* eca, const int n_expert, const int n_worker,
         CudaStreamManager* smgr) {
     dim3 grid_dim(CEIL(n_worker, 1024), n_expert);
     dim3 block_dim(1024);
@@ -31,9 +31,9 @@ void fmoe_cuda_limit_by_capacity_impl(const long* ec, int* cap,
 }
 
 __global__
-void prune_gate_by_capacity_kernel(const long* gate_idx, long* new_gate_idx,
+void prune_gate_by_capacity_kernel(const int* gate_idx, int* new_gate_idx,
         int* ec,
-        const long batch_size, const long n_expert, const long n_worker) {
+        const int batch_size, const int n_expert, const int n_worker) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < batch_size) {
         int orig_cap = atomicSub(ec + gate_idx[i], 1);
@@ -45,9 +45,9 @@ void prune_gate_by_capacity_kernel(const long* gate_idx, long* new_gate_idx,
     }
 }
 
-void fmoe_cuda_prune_gate_by_capacity_impl(long* gate_idx, long* new_gate_idx,
+void fmoe_cuda_prune_gate_by_capacity_impl(int* gate_idx, int* new_gate_idx,
         int* ec,
-        const long batch_size, const long n_expert, const long n_worker,
+        const int batch_size, const int n_expert, const int n_worker,
         CudaStreamManager* smgr) {
     dim3 grid_dim(CEIL(batch_size, 1024));
     dim3 block_dim(1024);

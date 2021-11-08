@@ -44,6 +44,7 @@ class GShardGate(NaiveGate):
 
         cap_rate = self.capacity[0 if self.training else 1]
         capacity = math.ceil(cap_rate * x.shape[0])
+        topk_idx = topk_idx.int()
         _new_lec, _new_gec, topk_idx = limit_by_capacity(
                 topk_idx, self.num_expert, self.world_size, capacity)
 

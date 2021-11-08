@@ -7,17 +7,17 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 torch::Tensor _expert_exchange(
         torch::Tensor local_expert_count,
-        long n_expert, long n_workers);
+        int n_expert, int n_workers);
 torch::Tensor _global_scatter(
         torch::Tensor input_buf,
         torch::Tensor local_expert_count,
         torch::Tensor global_expert_count,
-        long batch_size, long n_workers);
+        int batch_size, int n_workers);
 torch::Tensor _global_gather(
         torch::Tensor output_buf,
         torch::Tensor local_expert_count,
         torch::Tensor global_expert_count,
-        long batch_size, long n_workers);
+        int batch_size, int n_workers);
 void _ensure_nccl(c10d::ProcessGroupNCCL& p, torch::Tensor t);
 #endif  // FMOE_USE_NCCL
 
@@ -48,10 +48,10 @@ std::vector<torch::Tensor> _linear_backward(
 // balancing
 torch::Tensor _limit_by_capacity(
         torch::Tensor expert_count, torch::Tensor capacity,
-        long n_expert, long n_experts);
+        int n_expert, int n_experts);
 torch::Tensor _prune_gate_by_capacity(
         torch::Tensor gate_idx, torch::Tensor expert_count,
-        long n_expert, long n_worker);
+        int n_expert, int n_worker);
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 #ifdef FMOE_USE_NCCL

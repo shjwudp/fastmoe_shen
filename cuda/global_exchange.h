@@ -2,8 +2,8 @@
 #ifdef FMOE_USE_NCCL
 
 void fmoe_cuda_expert_exchange_impl(
-        const long* local_expert_count, 
-        long* global_expert_count, 
+        const int* local_expert_count, 
+        int* global_expert_count, 
         int n_expert, int world_size,
         CudaStreamManager* smgr) {
     NCCL_SAFE_CALL(ncclGroupStart());
@@ -11,14 +11,14 @@ void fmoe_cuda_expert_exchange_impl(
         NCCL_SAFE_CALL(ncclSend(
                 local_expert_count + n_expert * i,
                 n_expert,
-                ncclInt64,
+                ncclInt32,
                 i,
                 smgr->ncclcomm[0],
                 smgr->stream(0)));
         NCCL_SAFE_CALL(ncclRecv(
                 global_expert_count + n_expert * i,
                 n_expert,
-                ncclInt64,
+                ncclInt32,
                 i,
                 smgr->ncclcomm[0],
                 smgr->stream(0)));
@@ -30,23 +30,23 @@ void fmoe_cuda_expert_exchange_impl(
 template<typename scalar_t>
 void fmoe_cuda_global_scatter_impl(
     const scalar_t* local_input_buf,
-    const long* local_expert_count,
-    const long* global_expert_count,
+    const int* local_expert_count,
+    const int* global_expert_count,
     scalar_t* input_buf,
-    size_t in_feat, size_t n_expert, size_t world_size,
+    int in_feat, int n_expert, int world_size,
     CudaStreamManager* smgr) {
     // assert world_size > 1
     int recv_ptr = 0;
     /* TODO: may save for backward */
-    long*expert_ptr = new long[n_expert * world_size];
+    int*expert_ptr = new int[n_expert * world_size];
     expert_ptr[0] = 0;
-    for (size_t i = 1; i < n_expert * world_size; ++i) {
+    for (int i = 1; i < n_expert * world_size; ++i) {
         expert_ptr[i] = expert_ptr[i - 1] + local_expert_count[i - 1];
     }
 
-    for (size_t i = 0; i < n_expert; ++i) {
+    for (int i = 0; i < n_expert; ++i) {
         NCCL_SAFE_CALL(ncclGroupStart());
-        for (size_t j = 0; j < world_size; ++j) {
+        for (int j = 0; j < world_size; ++j) {
             int idx = i + j * n_expert;
             if (local_expert_count[idx]) {
                 NCCL_SAFE_CALL(ncclSend(
@@ -77,22 +77,22 @@ void fmoe_cuda_global_scatter_impl(
 template<typename scalar_t>
 void fmoe_cuda_global_gather_impl(
     const scalar_t* output_buf,
-    const long* local_expert_count,
-    const long* global_expert_count,
+    const int* local_expert_count,
+    const int* global_expert_count,
     scalar_t* local_output_buf,
-    size_t out_feat, size_t n_expert, size_t world_size,
+    int out_feat, int n_expert, int world_size,
     CudaStreamManager* smgr) {
-    long send_ptr = 0;
+    int send_ptr = 0;
     /* TODO: may save for backward */
-    long *expert_ptr = new long[n_expert * world_size];
+    int *expert_ptr = new int[n_expert * world_size];
     expert_ptr[0] = 0;
-    for (size_t i = 1; i < n_expert * world_size; ++i) {
+    for (int i = 1; i < n_expert * world_size; ++i) {
         expert_ptr[i] = expert_ptr[i - 1] + local_expert_count[i - 1];
     }
 
-    for (size_t i = 0; i < n_expert; ++i) {
+    for (int i = 0; i < n_expert; ++i) {
         NCCL_SAFE_CALL(ncclGroupStart());
-        for (size_t j = 0; j < world_size; ++j) {
+        for (int j = 0; j < world_size; ++j) {
             int idx = i + j * n_expert;
             if (global_expert_count[idx]) {
                 NCCL_SAFE_CALL(ncclSend(

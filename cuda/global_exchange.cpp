@@ -7,13 +7,13 @@
 
 torch::Tensor _expert_exchange(
         torch::Tensor local_expert_count,
-        long n_expert, long n_workers) {
+        int n_expert, int n_workers) {
     auto global_expert_count = torch::empty_like(local_expert_count);
     auto smgr = getCudaStreamManager(local_expert_count.device().index());
 
     fmoe_cuda_expert_exchange_impl(
-            local_expert_count.data_ptr<long>(),
-            global_expert_count.data_ptr<long>(),
+            local_expert_count.data_ptr<int>(),
+            global_expert_count.data_ptr<int>(),
             n_expert, n_workers,
             smgr);
     return global_expert_count;
@@ -23,7 +23,7 @@ torch::Tensor _global_scatter(
         torch::Tensor input_buf,
         torch::Tensor local_expert_count,
         torch::Tensor global_expert_count,
-        long batch_size, long n_workers) {
+        int batch_size, int n_workers) {
     CHECK_INPUT(input_buf);
 
     auto n_expert = local_expert_count.size(0) / n_workers;
@@ -35,8 +35,8 @@ torch::Tensor _global_scatter(
             "fmoe_cuda_global_scatter", ([&] {
         fmoe_cuda_global_scatter_impl<scalar_t>(
             input_buf.data_ptr<scalar_t>(),
-            local_expert_count.data_ptr<long>(),
-            global_expert_count.data_ptr<long>(),
+            local_expert_count.data_ptr<int>(),
+            global_expert_count.data_ptr<int>(),
             global_input_buf.data_ptr<scalar_t>(),
             in_feat, n_expert, n_workers,
             smgr
@@ -49,7 +49,7 @@ torch::Tensor _global_gather(
         torch::Tensor output_buf,
         torch::Tensor local_expert_count,
         torch::Tensor global_expert_count,
-        long batch_size, long n_workers) {
+        int batch_size, int n_workers) {
     CHECK_INPUT(output_buf);
 
     auto n_expert = local_expert_count.size(0) / n_workers;
@@ -61,8 +61,8 @@ torch::Tensor _global_gather(
             "fmoe_cuda_global_gather", ([&] {
         fmoe_cuda_global_gather_impl<scalar_t>(
             output_buf.data_ptr<scalar_t>(),
-            local_expert_count.data_ptr<long>(),
-            global_expert_count.data_ptr<long>(),
+            local_expert_count.data_ptr<int>(),
+            global_expert_count.data_ptr<int>(),
             local_output_buf.data_ptr<scalar_t>(),
             out_feat, n_expert, n_workers,
             smgr

@@ -222,8 +222,13 @@ class FMoE(nn.Module):
         """
         if self.mp_size > 1:
             inp = Slice.apply(inp, self.mp_rank, self.mp_size, self.mp_group)
+        import bagua.torch_api as bagua
+        #if bagua.get_rank() == 0:
+        #  from remote_pdb import RemotePdb
+        #  RemotePdb('127.0.0.1', 4444).set_trace()
 
         gate_top_k_idx, gate_score = self.gate(inp)
+        gate_top_k_idx = gate_top_k_idx.int()
         if self.gate_hook is not None:
             self.gate_hook(gate_top_k_idx, gate_score, None)
 

@@ -3,20 +3,20 @@
 #include "utils/fmoe_utils.h"
 
 __global__
-void assign_pos_kernel(int* cum_count, const long* gate, long* pos,
+void assign_pos_kernel(int* cum_count, const int* gate, int* pos,
         size_t numel, size_t topk) {
     size_t idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx < numel) {
-        long gate_idx = gate[idx];
+        int gate_idx = gate[idx];
         if (gate_idx > -1) {
             int p = atomicSub(cum_count + gate_idx, 1);
-            pos[p - 1] = (long)idx;
+            pos[p - 1] = (int)idx;
         }
     }
 }
 
 void fmoe_cuda_assign_pos_impl(
-        int* cum_count, const long* gate, long* pos,
+        int* cum_count, const int* gate, int* pos,
         const size_t batch_size, const size_t topk,
         CudaStreamManager* smgr) {
     size_t numel = batch_size * topk;
@@ -30,16 +30,16 @@ void fmoe_cuda_assign_pos_impl(
 #define WARP_SIZE 32
 
 __global__
-void expert_count_kernel(const long* gate_idx, int* expert_count,
-        const size_t batch_size, const size_t n_expert) {
+void expert_count_kernel(const int* gate_idx, int* expert_count,
+        int batch_size, int n_expert) {
     int res_tmp[PERTHREAD_EXPERTS] = {0};
-    long expert_min = blockIdx.x * PERTHREAD_EXPERTS;
-    long expert_max = expert_min + PERTHREAD_EXPERTS;
+    int expert_min = blockIdx.x * PERTHREAD_EXPERTS;
+    int expert_max = expert_min + PERTHREAD_EXPERTS;
     if (expert_max > n_expert) {
         expert_max = n_expert;
     }
     for (int i = threadIdx.x; i < batch_size; i += blockDim.x) {
-        long idx = gate_idx[i];
+        int idx = gate_idx[i];
         if (idx == -1) {
             continue;
         }
@@ -61,8 +61,8 @@ void expert_count_kernel(const long* gate_idx, int* expert_count,
 }
 
 void fmoe_cuda_expert_count_impl(
-        const long* gate_idx, int* expert_count,
-        const size_t batch_size, const size_t n_expert,
+        const int* gate_idx, int* expert_count,
+        int batch_size, int n_expert,
         CudaStreamManager* smgr) {
     expert_count_kernel
         <<<CEIL(n_expert, PERTHREAD_EXPERTS), 256, 0, smgr->stream(0)>>>

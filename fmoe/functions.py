@@ -22,7 +22,7 @@ def count_by_gate(gate, num_expert, world_size, require_pos=True):
             num_expert * world_size, device=gate.device, dtype=torch.int32
         )
         fmoe_cuda.expert_count(gate, local_expert_count)
-        local_expert_count = local_expert_count.long()
+        #local_expert_count = local_expert_count.long()
 
         if world_size > 1:
             global_expert_count = fmoe_cuda.expert_exchange(
@@ -35,7 +35,7 @@ def count_by_gate(gate, num_expert, world_size, require_pos=True):
         else:
             lec_cum = torch.cumsum(local_expert_count, dim=0).int()
             pos_size = lec_cum[-1].item()
-            pos = torch.empty((pos_size,), device=gate.device, dtype=torch.long)
+            pos = torch.empty((pos_size,), device=gate.device, dtype=torch.int)
             fmoe_cuda.assign_pos(lec_cum, gate, pos)
     return pos, local_expert_count, global_expert_count
 
@@ -51,7 +51,7 @@ def prepare_forward(gate, num_expert, world_size):
         world_size: number of workers that hold different experts.
         comm: the communicator of all workers in the expert-parallel group.
     """
-    pos, local_expert_count, global_expert_count = count_by_gate(gate, 
+    pos, local_expert_count, global_expert_count = count_by_gate(gate,
             num_expert, world_size)
     with torch.no_grad():
         fwd_expert_count = global_expert_count.view(world_size,
@@ -77,7 +77,7 @@ def _local_gather(inp, pos, out_batch_size, maybe_overlap=True):
     if maybe_overlap:
         inp_buf.index_add_(0, pos, inp)
     else:
-        inp_buf.index_copy_(0, pos, inp)
+        inp_buf.index_copy_(0, pos.long(), inp)
     return inp_buf
 
 

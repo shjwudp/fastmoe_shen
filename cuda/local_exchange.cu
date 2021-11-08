@@ -14,8 +14,8 @@ void _assign_pos(
     }
     fmoe_cuda_assign_pos_impl(
             cum_count.data_ptr<int>(),
-            gate.data_ptr<long>(),
-            pos.data_ptr<long>(),
+            gate.data_ptr<int>(),
+            pos.data_ptr<int>(),
             batch_size, topk, smgr);
 }
 
@@ -26,7 +26,7 @@ void _expert_count(
     auto batch_size = gate_idx.numel();
     auto n_expert = expert_count.numel();
     fmoe_cuda_expert_count_impl(
-            gate_idx.data_ptr<long>(),
+            gate_idx.data_ptr<int>(),
             expert_count.data_ptr<int>(),
             batch_size, n_expert, smgr);
 }
