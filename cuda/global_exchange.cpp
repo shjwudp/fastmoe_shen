@@ -75,7 +75,7 @@ torch::Tensor _global_gather(
 
 class HackNCCLGroup: public c10d::ProcessGroupNCCL {
 public:
-    ncclComm_t getcomm(at::Device dev) {
+    void getcomm(at::Device dev, ncclComm_t* comm, std::string index) {
         ncclUniqueId ncclID;
         int rank = getRank();
         if (rank == 0) {
@@ -85,14 +85,13 @@ public:
         (TORCH_VERSION_MAJOR == 1 && TORCH_VERSION_MINOR >= 8))
         broadcastUniqueNCCLID(&ncclID,
                 c10d::OpType::SEND,
-                "fastmoe_nccl_comm",
+                "fastmoe_nccl_comm" + index,
                 rank);
+        std::cerr << "broadcastUniqueNCCLID:\n";
 #else
         broadcastUniqueNCCLID(&ncclID);
 #endif
-        ncclComm_t comm;
-        NCCL_SAFE_CALL(ncclCommInitRank(&comm, getSize(), ncclID, rank));
-        return comm;
+        NCCL_SAFE_CALL(ncclCommInitRank(comm, getSize(), ncclID, rank));
     }
 };
 
@@ -102,7 +101,8 @@ void _ensure_nccl(c10d::ProcessGroupNCCL& p, torch::Tensor t) {
         return;
     }
     HackNCCLGroup* h = (HackNCCLGroup*)(void*)&p;
-    smgr->ncclcomm = h->getcomm(t.device());
+    h->getcomm(t.device(), &(smgr->ncclcomm[0]), "0");
+    h->getcomm(t.device(), &(smgr->ncclcomm[1]), "1");
     if (smgr->ncclcomm != 0) {
         smgr->ncclgood = 1;
     } else {

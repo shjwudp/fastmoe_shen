@@ -23,7 +23,7 @@ public:
     cudaStream_t* streams;
 #ifdef FMOE_USE_NCCL
     char ncclgood;
-    ncclComm_t ncclcomm;
+    ncclComm_t* ncclcomm;
 #endif
 
 public:

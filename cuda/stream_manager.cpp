@@ -6,7 +6,7 @@
 
 #include "stream_manager.h"
 
-#define SMGR_N_STREAMS 16
+#define SMGR_N_STREAMS 2
 
 cudaStream_t CudaStreamManager::stream(size_t idx) {
     return this->streams[idx % SMGR_N_STREAMS];
@@ -31,6 +31,7 @@ void CudaStreamManager::setup(const int device) {
     checkCudaErrors(cudaSetDevice(device));
     streams = new cudaStream_t[SMGR_N_STREAMS];
     handles = new cublasHandle_t[SMGR_N_STREAMS];
+    ncclcomm = new ncclComm_t[SMGR_N_STREAMS];
     for (size_t i = 0; i < SMGR_N_STREAMS; ++i) {
         checkCudaErrors(cudaStreamCreate(streams + i));
         checkCudaErrors(cublasCreate(handles + i));
@@ -45,6 +46,7 @@ void CudaStreamManager::destroy() {
     }
     delete[] streams;
     delete[] handles;
+    delete[] ncclcomm;
 }
 
 std::unordered_map<int, CudaStreamManager*> smgrs;

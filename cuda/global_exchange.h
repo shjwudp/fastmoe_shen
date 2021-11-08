@@ -13,14 +13,14 @@ void fmoe_cuda_expert_exchange_impl(
                 n_expert,
                 ncclInt64,
                 i,
-                smgr->ncclcomm,
+                smgr->ncclcomm[0],
                 smgr->stream(0)));
         NCCL_SAFE_CALL(ncclRecv(
                 global_expert_count + n_expert * i,
                 n_expert,
                 ncclInt64,
                 i,
-                smgr->ncclcomm,
+                smgr->ncclcomm[0],
                 smgr->stream(0)));
     }
     NCCL_SAFE_CALL(ncclGroupEnd());
@@ -54,8 +54,8 @@ void fmoe_cuda_global_scatter_impl(
                         local_expert_count[idx] * in_feat * sizeof(scalar_t),
                         ncclChar, 
                         j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
+                        smgr->ncclcomm[i % 2],
+                        smgr->stream(i % 2)));
             }
             if (global_expert_count[idx]) {
                 NCCL_SAFE_CALL(ncclRecv(
@@ -63,15 +63,15 @@ void fmoe_cuda_global_scatter_impl(
                         global_expert_count[idx] * in_feat * sizeof(scalar_t),
                         ncclChar,
                         j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
+                        smgr->ncclcomm[i % 2],
+                        smgr->stream(i % 2)));
                 recv_ptr += global_expert_count[idx];
             }
         }
         NCCL_SAFE_CALL(ncclGroupEnd());
     }
     delete [] expert_ptr;
-    smgr->sync(1);
+    smgr->sync(2);
 }
 
 template<typename scalar_t>
@@ -100,8 +100,8 @@ void fmoe_cuda_global_gather_impl(
                         global_expert_count[idx] * out_feat * sizeof(scalar_t),
                         ncclChar,
                         j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
+                        smgr->ncclcomm[i % 2],
+                        smgr->stream(i % 2)));
                 send_ptr += global_expert_count[idx];
             }
             if (local_expert_count[idx]) {
@@ -110,14 +110,14 @@ void fmoe_cuda_global_gather_impl(
                         local_expert_count[idx] * out_feat * sizeof(scalar_t),
                         ncclChar, 
                         j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
+                        smgr->ncclcomm[i % 2],
+                        smgr->stream(i % 2)));
             }
         }
         NCCL_SAFE_CALL(ncclGroupEnd());
     }
     delete [] expert_ptr;
-    smgr->sync(1);
+    smgr->sync(2);
 }
 
 
