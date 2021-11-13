@@ -70,6 +70,7 @@ torch::Tensor _global_scatter(
     auto global_input_buf = input_buf.new_empty({batch_size, in_feat});
     auto smgr = getCudaStreamManager(input_buf.device().index());
 
+    // 0  428.9
     long* expert_ptr = new long[local_expert_count.size(0)];
     long* local_expert_compress_ptr = new long[local_expert_count.size(0)];
     long* local_expert_count_ptr = local_expert_count.data_ptr<long>();
@@ -99,6 +100,7 @@ torch::Tensor _global_scatter(
             }
         }
     }
+    // 1 417.2 
     auto local_compressed = input_buf.new_empty({local_compress_size}, at::ScalarType::Byte);
     auto global_compressed = input_buf.new_empty({global_compress_size}, at::ScalarType::Byte);
 
@@ -108,6 +110,8 @@ torch::Tensor _global_scatter(
         reinterpret_cast<at::Half*>(local_compressed.data_ptr<uint8_t>()),
         smgr->stream(0));
     auto temp_buff = input_buf.new_empty({temp_buff_size}, at::ScalarType::Byte);
+
+    // 2 493.8
     long local_compress_ptr = 0;
     for (size_t j = 0; j < n_workers; ++j) {
       for (size_t i = 0; i < n_expert; ++i) {
@@ -129,18 +133,19 @@ torch::Tensor _global_scatter(
       }
     }
 
-    AT_DISPATCH_INTEGRAL_TYPES(local_compressed.scalar_type(),
-            "fmoe_cuda_global_scatter", ([&] {
-        fmoe_cuda_global_scatter_impl<scalar_t>(
-            local_compressed.data_ptr<scalar_t>(),
-            local_expert_compress_ptr,
-            global_expert_compress_ptr,
-            global_compressed.data_ptr<scalar_t>(),
-            1, n_expert, n_workers,
-            smgr
-        );
-    }));
+    //AT_DISPATCH_INTEGRAL_TYPES(local_compressed.scalar_type(),
+    //        "fmoe_cuda_global_scatter", ([&] {
+    //    fmoe_cuda_global_scatter_impl<scalar_t>(
+    //        local_compressed.data_ptr<scalar_t>(),
+    //        local_expert_compress_ptr,
+    //        global_expert_compress_ptr,
+    //        global_compressed.data_ptr<scalar_t>(),
+    //        1, n_expert, n_workers,
+    //        smgr
+    //    );
+    //}));
 
+    // 3 498.8/499.7 nocompress 444.6
     long global_compress_ptr = 0;
     long global_ptr = 0;
     for (size_t i = 0; i < n_expert; ++i) {
@@ -163,6 +168,17 @@ torch::Tensor _global_scatter(
     delete[] expert_ptr;
     delete[] local_expert_compress_ptr;
     delete[] global_expert_compress_ptr;
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_buf.scalar_type(), 
+            "fmoe_cuda_global_scatter", ([&] {
+        fmoe_cuda_global_scatter_impl<scalar_t>(
+        input_buf.data_ptr<scalar_t>(),
+        local_expert_count.data_ptr<long>(),
+        global_expert_count.data_ptr<long>(),
+        global_input_buf.data_ptr<scalar_t>(),
+        in_feat, n_expert, n_workers,
+        smgr
+        );
+     }));
     return global_input_buf;
 }
 
