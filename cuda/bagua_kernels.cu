@@ -765,6 +765,7 @@ void compress_f16_to_uint8_host_vector(
         half *input, int input_num_element, int max_chunk_size, int num_chunks, long* chunks_offset,
         uint8_t *output, size_t output_size, long* outputs_offset, half* min_max,
         void *dev_buffer, size_t dev_size, cudaStream_t stream) {
+    if (max_chunk_size == 0) return;
     compress_float_to_uint8_host_vector(
         input, input_num_element, max_chunk_size, num_chunks, chunks_offset,
         output, output_size, outputs_offset, min_max,
@@ -774,6 +775,7 @@ void compress_f16_to_uint8_host_vector(
 void decompress_uint8_to_f16_host_vector(
         uint8_t *input, int max_chunk_size, int num_chunks, long* inputs_offset,
         half *output, long* outputs_offset, cudaStream_t stream) {
+    if (max_chunk_size == 0) return;
     decompress_uint8_to_float_host_vector(input, max_chunk_size, num_chunks, inputs_offset,
             output, outputs_offset, stream);
 }
