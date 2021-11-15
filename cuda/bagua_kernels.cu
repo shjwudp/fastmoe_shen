@@ -535,6 +535,35 @@ decompress_uint8_to_float(uint8_t *input, size_t input_size, int chunk_size, int
     }
 }
 
+template<typename T>
+__global__ void
+decompress_uint8_to_float_vector(uint8_t *input, long* inputs_offset, T *output, long* outputs_offset) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int input_offset = 0;
+    int output_offset = 0;
+    if (idy > 0) {
+        input_offset = inputs_offset[idy - 1];
+        output_offset = outputs_offset[idy - 1];
+    }
+
+    if (output_offset >= outputs_offset[idy]) return;
+
+    const float min_ = __load_as_float(reinterpret_cast<T *>(input + input_offset));
+    const float max_ = __load_as_float(reinterpret_cast<T *>(input + input_offset + sizeof(T)));
+
+    float scale = 255.0 / (max_ - min_ + eps);
+    float upper_bound = rintf(max_ * scale);
+    float lower_bound = upper_bound - 255.0;
+
+    for (int i = idx; i < (outputs_offset[idy] - output_offset); i += blockDim.x * gridDim.x) {
+        int k = output_offset + i;
+        int o = input_offset + 32 + i;
+        output[k] = __minmax_uint8_decompress(input[o], scale, lower_bound, upper_bound, output[k]);
+    }
+}
+
 //template<typename T, bool average>
 //void reduce_chunk_inplace_host(T *input, int chunk_size, int num_chunks, int target_chunk, cudaStream_t stream) {
 //    if (num_chunks <= 4) {
@@ -617,6 +646,16 @@ void decompress_uint8_to_float_host(uint8_t *input, size_t input_size, int chunk
     dim3 num_blocks(DIVUP(chunk_size, 1024), num_chunks);
     decompress_uint8_to_float<<<num_blocks, 1024, 0, stream>>>(input, input_size,
                                                              chunk_size, chunk_offset, num_chunks, output);
+    CUDACHECK(cudaGetLastError());
+}
+
+template<typename T>
+void decompress_uint8_to_float_host_vector(
+        uint8_t *input, int max_chunk_size, int num_chunks, long* inputs_offset,
+        T *output, long* outputs_offset, cudaStream_t stream) {
+
+    dim3 num_blocks(DIVUP(max_chunk_size, 1024), num_chunks);
+    decompress_uint8_to_float_vector<<<num_blocks, 1024, 0, stream>>>(input, inputs_offset, output, outputs_offset); 
     CUDACHECK(cudaGetLastError());
 }
 
@@ -730,6 +769,13 @@ void compress_f16_to_uint8_host_vector(
         input, input_num_element, max_chunk_size, num_chunks, chunks_offset,
         output, output_size, outputs_offset, min_max,
         dev_buffer, dev_size, stream);
+}
+
+void decompress_uint8_to_f16_host_vector(
+        uint8_t *input, int max_chunk_size, int num_chunks, long* inputs_offset,
+        half *output, long* outputs_offset, cudaStream_t stream) {
+    decompress_uint8_to_float_host_vector(input, max_chunk_size, num_chunks, inputs_offset,
+            output, outputs_offset, stream);
 }
 
 }

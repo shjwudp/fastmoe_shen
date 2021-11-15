@@ -26,12 +26,13 @@ extern "C" void compress_f16_to_uint8_host_vector(
     size_t dev_size,
     cudaStream_t stream);
 
-extern "C" void decompress_uint8_to_f16_host(
+extern "C" void decompress_uint8_to_f16_host_vector(
     uint8_t *input,
-    size_t input_size,
-    int chunk_size,
+    int max_chunk_size,
     int num_chunks,
+    long* inputs_offset,
     at::Half *output,
+    long* outputs_offset,
     cudaStream_t stream);
 
 int align_size(int size, int align) {
@@ -78,7 +79,9 @@ torch::Tensor _global_scatter(
     int max_chunk_size = local_expert_count.max().data_ptr<long>()[0] * in_feat;
     int num_chunks = local_expert_count.size(0);
     auto local_offset = local_expert_count.cumsum(0) * in_feat;
+    auto global_offset = global_expert_count.cumsum(0) * in_feat;
     auto local_compressed_offset = local_offset.clone();
+    auto global_compressed_offset = global_offset.clone();
     if (rank == 0) {
       std::cout << "local_offset: " << local_offset << std::endl;
       std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
@@ -98,7 +101,9 @@ torch::Tensor _global_scatter(
     long local_compress_size = 0;
     long global_compress_size = 0;
     long* local_compressed_offset_ptr = local_compressed_offset.data_ptr<long>();
+    long* global_compressed_offset_ptr = global_compressed_offset.data_ptr<long>();
     long local_com_offset = 0;
+    long global_com_offset = 0;
     for (size_t j = 0; j < n_workers; ++j) {
       for (size_t i = 0; i < n_expert; ++i) {
             int idx = i + j * n_expert;
@@ -114,9 +119,11 @@ torch::Tensor _global_scatter(
             if (global_expert_count_ptr[idx]) {
               global_expert_compress_ptr[idx] = global_expert_count_ptr[idx] * in_feat + 32;
               global_compress_size += global_expert_compress_ptr[idx];
+              global_com_offset += 32;
             } else {
               global_expert_compress_ptr[idx] = 0;
             }
+            global_compressed_offset_ptr[idx] += global_com_offset;
         }
     }
 
@@ -185,24 +192,14 @@ torch::Tensor _global_scatter(
         );
     }));
 
-    long global_compress_ptr = 0;
-    long global_ptr = 0;
-    for (size_t i = 0; i < n_expert; ++i) {
-      for (size_t j = 0; j < n_workers; ++j) {
-        int idx = i + j * n_expert;
-        if (global_expert_count_ptr[idx]) {
-          decompress_uint8_to_f16_host(
-              global_compressed.data_ptr<uint8_t>() + global_compress_ptr,
-              global_expert_compress_ptr[idx],
-              global_expert_count_ptr[idx] * in_feat,
-              1,
-              global_input_buf.data_ptr<at::Half>() + global_ptr,
-              smgr->stream(0));
-          global_ptr += global_expert_count_ptr[idx] * in_feat;
-          global_compress_ptr += global_expert_compress_ptr[idx];
-        }
-     }
-    }
+    decompress_uint8_to_f16_host_vector(
+        global_compressed.data_ptr<uint8_t>(),
+        max_chunk_size,  // TODO use global max_chunk_size
+        num_chunks,
+        global_compressed_offset.cuda().data_ptr<long>(),
+        global_input_buf.data_ptr<at::Half>(),
+        global_offset.cuda().data_ptr<long>(),
+        smgr->stream(0));
 
     //delete[] expert_ptr;
     delete[] local_expert_compress_ptr;
