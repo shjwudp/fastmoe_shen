@@ -84,8 +84,8 @@ torch::Tensor _global_scatter(
     auto local_compressed_offset = local_offset.clone();
     auto global_compressed_offset = global_offset.clone();
     if (rank == 0) {
-      //std::cout << "local_offset: " << local_offset << std::endl;
-      //std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
+      std::cout << "local_offset: " << local_offset << std::endl;
+      std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
     }
 
     //long* expert_ptr = new long[local_expert_count.size(0)];
@@ -122,6 +122,7 @@ torch::Tensor _global_scatter(
     //long global_compress_size = 0;
     long pre_global_offset = 0;
     long pre_global_com_offset = 0;
+    int global_idx = 0;
     for (size_t i = 0; i < n_expert; ++i) {
       for (size_t j = 0; j < n_workers; ++j) {
         int idx = i + j * n_expert;
@@ -130,18 +131,19 @@ torch::Tensor _global_scatter(
           global_expert_compress_ptr[idx] += 32;
         }
 
-        global_offset_ptr[idx] = global_expert_count_ptr[idx] * in_feat + pre_global_offset;
-        global_compressed_offset_ptr[idx] = global_expert_compress_ptr[idx] + pre_global_com_offset;
+        global_offset_ptr[global_idx] = global_expert_count_ptr[idx] * in_feat + pre_global_offset;
+        global_compressed_offset_ptr[global_idx] = global_expert_compress_ptr[idx] + pre_global_com_offset;
 
-        pre_global_offset = global_offset_ptr[idx];
-        pre_global_com_offset = global_compressed_offset_ptr[idx];
+        pre_global_offset = global_offset_ptr[global_idx];
+        pre_global_com_offset = global_compressed_offset_ptr[global_idx];
+        global_idx++;
       }
     }
 
     if (rank == 0) {
-      //std::cout << "local_expert_count: " << local_expert_count << std::endl;
-      //std::cout << "global_expert_count: " << global_expert_count << std::endl;
-      //std::cout << "size: " << local_compress_size << "_" << global_compress_size << std::endl;
+      std::cout << "local_expert_count: " << local_expert_count << std::endl;
+      std::cout << "global_expert_count: " << global_expert_count << std::endl;
+      std::cout << "local_compress_size: " << local_compress_size << std::endl;
       //std::cout << "local_compressed_offset2: " << local_compressed_offset << std::endl;
     }
 
@@ -169,11 +171,17 @@ torch::Tensor _global_scatter(
     if (rank == 0) {
       //std::cout << "input_buf: " << input_buf << std::endl;
       std::cout << "max_chunk_size: " << max_chunk_size << "_" << input_buf.size(0) << "_" << num_chunks << std::endl;
-      //std::cout << "local_offset: " << local_offset << std::endl;
+      std::cout << "local_offset: " << local_offset << std::endl;
       //std::cout << "local_compressed: " << local_compressed << std::endl;
-      //std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
+      std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
       //std::cout << "min_max: " << min_max << std::endl;
       //std::cout << "temp_buff: " << temp_buff_size << "\n" << temp_buff << std::endl;
+      //std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
+      for (int i = 0; i < num_chunks; i++) {
+        std::cout << "local_global_expert_compress: " << local_expert_compress_ptr[i] << ":" << global_expert_compress_ptr[i] << std::endl; 
+      }
+      std::cout << "global_compressed_offset: " << global_compressed_offset << std::endl;
+      std::cout << "global_offset: " << global_offset << std::endl;
     }
     compress_f16_to_uint8_host_vector(
         input_buf.data_ptr<at::Half>(),
