@@ -71,7 +71,6 @@ void fmoe_cuda_global_scatter_impl(
         NCCL_SAFE_CALL(ncclGroupEnd());
     }
     delete [] expert_ptr;
-    smgr->sync(1);
 }
 
 template<typename scalar_t>

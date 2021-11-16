@@ -19,7 +19,6 @@ extern "C" void compress_f16_to_uint8_host_vector(
     int num_chunks,
     long* chunks_offset,
     uint8_t *output,
-    size_t output_size,
     long* outputs_offset,
     at::Half* min_max,
     void *dev_buffer,
@@ -72,54 +71,58 @@ torch::Tensor _global_scatter(
     auto in_feat = input_buf.size(1);
     auto global_input_buf = input_buf.new_empty({batch_size, in_feat});
     auto smgr = getCudaStreamManager(input_buf.device().index());
-    int rank = -1;
-    //ncclCommUserRank(smgr->ncclcomm, &rank);
-
 
     int max_chunk_size = local_expert_count.max().data_ptr<long>()[0] * in_feat;
     int global_max_chunk_size = global_expert_count.max().data_ptr<long>()[0] * in_feat;
     int num_chunks = local_expert_count.size(0);
+
+    // local
     auto local_offset = local_expert_count.cumsum(0) * in_feat;
-    auto global_offset = global_expert_count.new_empty({global_expert_count.size(0)});
     auto local_compressed_offset = local_offset.clone();
-    auto global_compressed_offset = global_offset.clone();
-    if (rank == 0) {
-      std::cout << "local_offset: " << local_offset << std::endl;
-      std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
-    }
-
-    //long* expert_ptr = new long[local_expert_count.size(0)];
-    long* local_offset_ptr = local_offset.data_ptr<long>();
-    //expert_ptr[0] = 0;
-    //for (size_t i = 1; i < n_expert * n_workers; ++i) {
-    //    expert_ptr[i] = expert_ptr[i - 1] + local_expert_count_ptr[i - 1];
-    //}
-
     long* local_expert_count_ptr = local_expert_count.data_ptr<long>();
     long* local_expert_compress_ptr = new long[num_chunks];
-    long local_compress_size = 0;
     long* local_compressed_offset_ptr = local_compressed_offset.data_ptr<long>();
     long local_com_offset = 0;
-    for (size_t j = 0; j < n_workers; ++j) {
-      for (size_t i = 0; i < n_expert; ++i) {
-            int idx = i + j * n_expert;
-            if (local_expert_count_ptr[idx]) {
-              local_expert_compress_ptr[idx] = local_expert_count_ptr[idx] * in_feat + 32;
-              local_compress_size += local_expert_compress_ptr[idx];
-              local_com_offset += 32;
-            } else {
-              local_expert_compress_ptr[idx] = 0;
-            }
-            local_compressed_offset_ptr[idx] += local_com_offset;
-
+    for (size_t i = 0; i < num_chunks; i++) {
+        local_expert_compress_ptr[i] = local_expert_count_ptr[i] * in_feat;
+        if (local_expert_count_ptr[i]) {
+          local_expert_compress_ptr[i] += 32;
+          local_com_offset += 32;
         }
+        local_compressed_offset_ptr[i] += local_com_offset;
     }
+    auto local_compressed = input_buf.new_empty({local_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
 
+    // temp_buff min_max
+    auto min_max = input_buf.new_empty({2}, at::ScalarType::Half);
+    size_t temp_buff_size = array_min_max_size_f16_host(
+        input_buf.data_ptr<at::Half>(),
+        input_buf.numel(),
+        reinterpret_cast<at::Half*>(local_compressed.data_ptr<uint8_t>()),
+        smgr->stream(0));
+    auto temp_buff = input_buf.new_empty({temp_buff_size}, at::ScalarType::Byte);
+
+    // compress
+    compress_f16_to_uint8_host_vector(
+        input_buf.data_ptr<at::Half>(),
+        input_buf.numel(),
+        max_chunk_size,
+        num_chunks,
+        local_offset.cuda().data_ptr<long>(),
+        local_compressed.data_ptr<uint8_t>(),
+        local_compressed_offset.cuda().data_ptr<long>(),
+        min_max.data_ptr<at::Half>(),
+        temp_buff.data_ptr<uint8_t>(),
+        temp_buff_size,
+        smgr->stream(0));
+
+    // global
+    auto global_offset = global_expert_count.new_empty({num_chunks});
+    auto global_compressed_offset = global_offset.clone();
     long* global_expert_count_ptr = global_expert_count.data_ptr<long>();
     long* global_expert_compress_ptr = new long[num_chunks];
     long* global_offset_ptr = global_offset.data_ptr<long>();
     long* global_compressed_offset_ptr = global_compressed_offset.data_ptr<long>();
-    //long global_compress_size = 0;
     long pre_global_offset = 0;
     long pre_global_com_offset = 0;
     int global_idx = 0;
@@ -140,65 +143,9 @@ torch::Tensor _global_scatter(
       }
     }
 
-    if (rank == 0) {
-      std::cout << "local_expert_count: " << local_expert_count << std::endl;
-      std::cout << "global_expert_count: " << global_expert_count << std::endl;
-      std::cout << "local_compress_size: " << local_compress_size << std::endl;
-      //std::cout << "local_compressed_offset2: " << local_compressed_offset << std::endl;
-    }
+    auto global_compressed = input_buf.new_empty({global_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
 
-
-    auto local_compressed = input_buf.new_empty({local_compress_size}, at::ScalarType::Byte);
-    auto global_compressed = input_buf.new_empty({global_compressed_offset_ptr[n_expert * n_workers - 1]}, at::ScalarType::Byte);
-    auto min_max = input_buf.new_empty({2}, at::ScalarType::Half);
-
-    size_t temp_buff_size = array_min_max_size_f16_host(
-        input_buf.data_ptr<at::Half>(),
-        input_buf.numel(),
-        reinterpret_cast<at::Half*>(local_compressed.data_ptr<uint8_t>()),
-        smgr->stream(0));
-    auto temp_buff = input_buf.new_empty({temp_buff_size}, at::ScalarType::Byte);
-
-    if (rank == 0) {
-      //std::cout << "device: " << input_buf.device() << "_" << local_expert_count.device() << "_" << local_compressed.device() << std::endl;
-    }
-    local_offset = local_offset.cuda();
-    local_compressed_offset = local_compressed_offset.cuda();
-    if (rank == 0) {
-      //std::cout << "device: " << local_offset.device() <<  "_" << local_compressed_offset.device() << std::endl;
-    }
-
-    if (rank == 0) {
-      //std::cout << "input_buf: " << input_buf << std::endl;
-      std::cout << "max_chunk_size: " << max_chunk_size << "_" << input_buf.size(0) << "_" << num_chunks << std::endl;
-      std::cout << "local_offset: " << local_offset << std::endl;
-      //std::cout << "local_compressed: " << local_compressed << std::endl;
-      std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
-      //std::cout << "min_max: " << min_max << std::endl;
-      //std::cout << "temp_buff: " << temp_buff_size << "\n" << temp_buff << std::endl;
-      //std::cout << "local_compressed_offset: " << local_compressed_offset << std::endl;
-      for (int i = 0; i < num_chunks; i++) {
-        std::cout << "local_global_expert_compress: " << local_expert_compress_ptr[i] << ":" << global_expert_compress_ptr[i] << std::endl; 
-      }
-      std::cout << "global_compressed_offset: " << global_compressed_offset << std::endl;
-      std::cout << "global_offset: " << global_offset << std::endl;
-    }
-    compress_f16_to_uint8_host_vector(
-        input_buf.data_ptr<at::Half>(),
-        input_buf.numel(),
-        max_chunk_size,
-        num_chunks,
-        local_offset.data_ptr<long>(),
-        //local_offset_ptr,
-        local_compressed.data_ptr<uint8_t>(),
-        local_compress_size,
-        local_compressed_offset.data_ptr<long>(),
-        //local_compressed_offset_ptr,
-        min_max.data_ptr<at::Half>(),
-        temp_buff.data_ptr<uint8_t>(),
-        temp_buff_size,
-        smgr->stream(0));
-
+    // alltoall
     AT_DISPATCH_INTEGRAL_TYPES(local_compressed.scalar_type(),
             "fmoe_cuda_global_scatter", ([&] {
         fmoe_cuda_global_scatter_impl<scalar_t>(
@@ -211,6 +158,7 @@ torch::Tensor _global_scatter(
         );
     }));
 
+    // decompress
     decompress_uint8_to_f16_host_vector(
         global_compressed.data_ptr<uint8_t>(),
         global_max_chunk_size,
@@ -220,9 +168,9 @@ torch::Tensor _global_scatter(
         global_offset.cuda().data_ptr<long>(),
         smgr->stream(0));
 
-    //delete[] expert_ptr;
     delete[] local_expert_compress_ptr;
     delete[] global_expert_compress_ptr;
+    smgr->sync(1);
     return global_input_buf;
 }
 
