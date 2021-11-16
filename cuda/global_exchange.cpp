@@ -186,17 +186,116 @@ torch::Tensor _global_gather(
     auto local_output_buf = output_buf.new_empty({batch_size, out_feat});
     auto smgr = getCudaStreamManager(output_buf.device().index());
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(output_buf.scalar_type(), 
-            "fmoe_cuda_global_gather", ([&] {
+    int max_chunk_size = local_expert_count.max().data_ptr<long>()[0] * out_feat;
+    int global_max_chunk_size = global_expert_count.max().data_ptr<long>()[0] * out_feat;
+    int num_chunks = local_expert_count.size(0);
+
+    // global
+    auto global_offset = global_expert_count.new_empty({num_chunks});
+    auto global_compressed_offset = global_offset.clone();
+    long* global_expert_count_ptr = global_expert_count.data_ptr<long>();
+    long* global_expert_compress_ptr = new long[num_chunks];
+    long* global_offset_ptr = global_offset.data_ptr<long>();
+    long* global_compressed_offset_ptr = global_compressed_offset.data_ptr<long>();
+    long pre_global_offset = 0;
+    long pre_global_com_offset = 0;
+    int global_idx = 0;
+    for (size_t i = 0; i < n_expert; ++i) {
+      for (size_t j = 0; j < n_workers; ++j) {
+        int idx = i + j * n_expert;
+        global_expert_compress_ptr[idx] = global_expert_count_ptr[idx] * out_feat;
+        if (global_expert_count_ptr[idx]) {
+          global_expert_compress_ptr[idx] += 32;
+        }
+
+        global_offset_ptr[global_idx] = global_expert_count_ptr[idx] * out_feat + pre_global_offset;
+        global_compressed_offset_ptr[global_idx] = global_expert_compress_ptr[idx] + pre_global_com_offset;
+
+        pre_global_offset = global_offset_ptr[global_idx];
+        pre_global_com_offset = global_compressed_offset_ptr[global_idx];
+        global_idx++;
+      }
+    }
+    auto global_compressed = output_buf.new_empty({global_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
+
+    // temp_buff min_max
+    auto min_max = output_buf.new_empty({2}, at::ScalarType::Half);
+    size_t temp_buff_size = array_min_max_size_f16_host(
+        output_buf.data_ptr<at::Half>(),
+        output_buf.numel(),
+        reinterpret_cast<at::Half*>(global_compressed.data_ptr<uint8_t>()),
+        smgr->stream(0));
+    auto temp_buff = output_buf.new_empty({temp_buff_size}, at::ScalarType::Byte);
+
+    // compress
+    compress_f16_to_uint8_host_vector(
+        output_buf.data_ptr<at::Half>(),
+        output_buf.numel(),
+        global_max_chunk_size,
+        num_chunks,
+        global_offset.cuda().data_ptr<long>(),
+        global_compressed.data_ptr<uint8_t>(),
+        global_compressed_offset.cuda().data_ptr<long>(),
+        min_max.data_ptr<at::Half>(),
+        temp_buff.data_ptr<uint8_t>(),
+        temp_buff_size,
+        smgr->stream(0));
+
+    // local
+    auto local_offset = local_expert_count.cumsum(0) * out_feat;
+    auto local_compressed_offset = local_offset.clone();
+    long* local_expert_count_ptr = local_expert_count.data_ptr<long>();
+    long* local_expert_compress_ptr = new long[num_chunks];
+    long* local_compressed_offset_ptr = local_compressed_offset.data_ptr<long>();
+    long local_com_offset = 0;
+    for (size_t i = 0; i < num_chunks; i++) {
+        local_expert_compress_ptr[i] = local_expert_count_ptr[i] * out_feat;
+        if (local_expert_count_ptr[i]) {
+          local_expert_compress_ptr[i] += 32;
+          local_com_offset += 32;
+        }
+        local_compressed_offset_ptr[i] += local_com_offset;
+    }
+    auto local_compressed = output_buf.new_empty({local_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
+
+    // alltoall
+    AT_DISPATCH_INTEGRAL_TYPES(global_compressed.scalar_type(),
+            "fmoe_cuda_global_scatter", ([&] {
         fmoe_cuda_global_gather_impl<scalar_t>(
-            output_buf.data_ptr<scalar_t>(),
-            local_expert_count.data_ptr<long>(),
-            global_expert_count.data_ptr<long>(),
-            local_output_buf.data_ptr<scalar_t>(),
-            out_feat, n_expert, n_workers,
+            global_compressed.data_ptr<scalar_t>(),
+            local_expert_compress_ptr,
+            global_expert_compress_ptr,
+            local_compressed.data_ptr<scalar_t>(),
+            1, n_expert, n_workers,
             smgr
         );
     }));
+
+    //AT_DISPATCH_FLOATING_TYPES_AND_HALF(output_buf.scalar_type(), 
+    //        "fmoe_cuda_global_gather", ([&] {
+    //    fmoe_cuda_global_gather_impl<scalar_t>(
+    //        output_buf.data_ptr<scalar_t>(),
+    //        local_expert_count.data_ptr<long>(),
+    //        global_expert_count.data_ptr<long>(),
+    //        local_output_buf.data_ptr<scalar_t>(),
+    //        out_feat, n_expert, n_workers,
+    //        smgr
+    //    );
+    //}));
+    
+    // decompress
+    decompress_uint8_to_f16_host_vector(
+        local_compressed.data_ptr<uint8_t>(),
+        max_chunk_size,
+        num_chunks,
+        local_compressed_offset.cuda().data_ptr<long>(),
+        local_output_buf.data_ptr<at::Half>(),
+        local_offset.cuda().data_ptr<long>(),
+        smgr->stream(0));
+
+    delete[] local_expert_compress_ptr;
+    delete[] global_expert_compress_ptr;
+    smgr->sync(1);
     return local_output_buf;
 }
 
