@@ -175,29 +175,29 @@ torch::Tensor _global_scatter(
 }
 
 torch::Tensor _global_gather(
-        torch::Tensor compressed,
+        torch::Tensor output_buf,
         torch::Tensor local_expert_count,
         torch::Tensor global_expert_count,
         long batch_size, long n_workers) {
-    CHECK_INPUT(compressed);
+    CHECK_INPUT(output_buf);
 
     auto n_expert = local_expert_count.size(0) / n_workers;
-    auto out_feat = compressed.size(1);
-    auto local_compressed = compressed.new_empty({batch_size, out_feat});
-    auto smgr = getCudaStreamManager(compressed.device().index());
+    auto out_feat = output_buf.size(1);
+    auto local_output_buf = output_buf.new_empty({batch_size, out_feat});
+    auto smgr = getCudaStreamManager(output_buf.device().index());
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(compressed.scalar_type(), 
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(output_buf.scalar_type(), 
             "fmoe_cuda_global_gather", ([&] {
         fmoe_cuda_global_gather_impl<scalar_t>(
-            compressed.data_ptr<scalar_t>(),
+            output_buf.data_ptr<scalar_t>(),
             local_expert_count.data_ptr<long>(),
             global_expert_count.data_ptr<long>(),
-            local_compressed.data_ptr<scalar_t>(),
+            local_output_buf.data_ptr<scalar_t>(),
             out_feat, n_expert, n_workers,
             smgr
         );
     }));
-    return local_compressed;
+    return local_output_buf;
 }
 
 #include <c10d/ProcessGroupNCCL.hpp>
