@@ -260,7 +260,7 @@ torch::Tensor _global_gather(
 
     // alltoall
     AT_DISPATCH_INTEGRAL_TYPES(global_compressed.scalar_type(),
-            "fmoe_cuda_global_scatter", ([&] {
+            "fmoe_cuda_global_gather", ([&] {
         fmoe_cuda_global_gather_impl<scalar_t>(
             global_compressed.data_ptr<scalar_t>(),
             local_expert_compress_ptr,
@@ -271,18 +271,6 @@ torch::Tensor _global_gather(
         );
     }));
 
-    //AT_DISPATCH_FLOATING_TYPES_AND_HALF(output_buf.scalar_type(), 
-    //        "fmoe_cuda_global_gather", ([&] {
-    //    fmoe_cuda_global_gather_impl<scalar_t>(
-    //        output_buf.data_ptr<scalar_t>(),
-    //        local_expert_count.data_ptr<long>(),
-    //        global_expert_count.data_ptr<long>(),
-    //        local_output_buf.data_ptr<scalar_t>(),
-    //        out_feat, n_expert, n_workers,
-    //        smgr
-    //    );
-    //}));
-    
     // decompress
     decompress_uint8_to_f16_host_vector(
         local_compressed.data_ptr<uint8_t>(),
