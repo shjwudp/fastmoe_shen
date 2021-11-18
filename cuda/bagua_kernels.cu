@@ -564,6 +564,36 @@ decompress_uint8_to_float_vector(uint8_t *input, long* inputs_offset, T *output,
     }
 }
 
+template<typename T>
+__global__ void
+decompress_uint8_to_float_vector_exchange(uint8_t *input, long* inputs_offset, int n_workers, int n_experts, T *output, long* outputs_offset) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+    int output_idy = (idy % n_experts) * n_workers +  (idy / n_experts);
+
+    int input_offset = 0;
+    int output_offset = 0;
+    if (idy > 0) {
+        input_offset = inputs_offset[idy - 1];
+        output_offset = outputs_offset[output_idy - 1];
+    }
+
+    if (output_offset >= outputs_offset[output_idy]) return;
+
+    const float min_ = __load_as_float(reinterpret_cast<T *>(input + input_offset));
+    const float max_ = __load_as_float(reinterpret_cast<T *>(input + input_offset + sizeof(T)));
+
+    float scale = 255.0 / (max_ - min_ + eps);
+    float upper_bound = rintf(max_ * scale);
+    float lower_bound = upper_bound - 255.0;
+
+    for (int i = idx; i < (outputs_offset[output_idy] - output_offset); i += blockDim.x * gridDim.x) {
+        int k = output_offset + i;
+        int o = input_offset + 32 + i;
+        output[k] = __minmax_uint8_decompress(input[o], scale, lower_bound, upper_bound, output[k]);
+    }
+}
+
 //template<typename T, bool average>
 //void reduce_chunk_inplace_host(T *input, int chunk_size, int num_chunks, int target_chunk, cudaStream_t stream) {
 //    if (num_chunks <= 4) {
@@ -658,6 +688,17 @@ void decompress_uint8_to_float_host_vector(
     decompress_uint8_to_float_vector<<<num_blocks, 1024, 0, stream>>>(input, inputs_offset, output, outputs_offset); 
     CUDACHECK(cudaGetLastError());
 }
+
+template<typename T>
+void decompress_uint8_to_float_host_vector_exchange(
+        uint8_t *input, int max_chunk_size, int n_workers, int n_experts, long* inputs_offset,
+        T *output, long* outputs_offset, cudaStream_t stream) {
+
+    dim3 num_blocks(DIVUP(max_chunk_size, 1024), n_workers * n_experts);
+    decompress_uint8_to_float_vector_exchange<<<num_blocks, 1024, 0, stream>>>(input, inputs_offset, n_workers, n_experts, output, outputs_offset); 
+    CUDACHECK(cudaGetLastError());
+}
+
 
 extern "C" {
 //void divide_inplace_f32_host(float *x, float D_, int N, cudaStream_t stream) {
@@ -777,6 +818,14 @@ void decompress_uint8_to_f16_host_vector(
         half *output, long* outputs_offset, cudaStream_t stream) {
     if (max_chunk_size == 0) return;
     decompress_uint8_to_float_host_vector(input, max_chunk_size, num_chunks, inputs_offset,
+            output, outputs_offset, stream);
+}
+
+void decompress_uint8_to_f16_host_vector_exchange(
+        uint8_t *input, int max_chunk_size, int n_workers, int n_experts, long* inputs_offset,
+        half *output, long* outputs_offset, cudaStream_t stream) {
+    if (max_chunk_size == 0) return;
+    decompress_uint8_to_float_host_vector_exchange(input, max_chunk_size, n_workers, n_experts, inputs_offset,
             output, outputs_offset, stream);
 }
 

@@ -33,44 +33,42 @@ void fmoe_cuda_global_scatter_impl(
     const long* local_expert_count,
     const long* global_expert_count,
     scalar_t* input_buf,
-    size_t in_feat, size_t n_expert, size_t world_size,
+    size_t world_size,
     CudaStreamManager* smgr) {
-    // assert world_size > 1
+    int send_ptr = 0;
     int recv_ptr = 0;
     /* TODO: may save for backward */
-    long*expert_ptr = new long[n_expert * world_size];
-    expert_ptr[0] = 0;
-    for (size_t i = 1; i < n_expert * world_size; ++i) {
-        expert_ptr[i] = expert_ptr[i - 1] + local_expert_count[i - 1];
-    }
+    //long*expert_ptr = new long[world_size];
+    //expert_ptr[0] = 0;
+    //for (size_t i = 1; i < world_size; ++i) {
+    //    expert_ptr[i] = expert_ptr[i - 1] + local_expert_count[i - 1];
+    //}
 
-    for (size_t i = 0; i < n_expert; ++i) {
-        NCCL_SAFE_CALL(ncclGroupStart());
-        for (size_t j = 0; j < world_size; ++j) {
-            int idx = i + j * n_expert;
-            if (local_expert_count[idx]) {
-                NCCL_SAFE_CALL(ncclSend(
-                        local_input_buf + expert_ptr[idx] * in_feat, 
-                        local_expert_count[idx] * in_feat * sizeof(scalar_t),
-                        ncclChar, 
-                        j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
-            }
-            if (global_expert_count[idx]) {
-                NCCL_SAFE_CALL(ncclRecv(
-                        input_buf + recv_ptr * in_feat,
-                        global_expert_count[idx] * in_feat * sizeof(scalar_t),
-                        ncclChar,
-                        j,
-                        smgr->ncclcomm,
-                        smgr->stream(0)));
-                recv_ptr += global_expert_count[idx];
-            }
+    NCCL_SAFE_CALL(ncclGroupStart());
+    for (size_t i = 0; i < world_size; ++i) {
+        if (local_expert_count[i]) {
+            NCCL_SAFE_CALL(ncclSend(
+                    local_input_buf + send_ptr,
+                    local_expert_count[i],
+                    ncclChar,
+                    i,
+                    smgr->ncclcomm,
+                    smgr->stream(0)));
+            send_ptr += local_expert_count[i];
         }
-        NCCL_SAFE_CALL(ncclGroupEnd());
+        if (global_expert_count[i]) {
+            NCCL_SAFE_CALL(ncclRecv(
+                    input_buf + recv_ptr,
+                    global_expert_count[i],
+                    ncclChar,
+                    i,
+                    smgr->ncclcomm,
+                    smgr->stream(0)));
+            recv_ptr += global_expert_count[i];
+        }
     }
-    delete [] expert_ptr;
+    NCCL_SAFE_CALL(ncclGroupEnd());
+    //delete [] expert_ptr;
 }
 
 template<typename scalar_t>

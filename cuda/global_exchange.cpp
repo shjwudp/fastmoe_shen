@@ -34,6 +34,16 @@ extern "C" void decompress_uint8_to_f16_host_vector(
     long* outputs_offset,
     cudaStream_t stream);
 
+extern "C" void decompress_uint8_to_f16_host_vector_exchange(
+    uint8_t *input,
+    int max_chunk_size,
+    int n_workers,
+    int n_experts,
+    long* inputs_offset,
+    at::Half *output,
+    long* outputs_offset,
+    cudaStream_t stream);
+
 int align_size(int size, int align) {
   return ((size) + (align) - 1) / (align) * (align);
 }
@@ -79,17 +89,33 @@ torch::Tensor _global_scatter(
     // local
     auto local_offset = local_expert_count.cumsum(0) * in_feat;
     auto local_compressed_offset = local_offset.clone();
+    auto global_compressed_offset = global_expert_count.cumsum(0) * in_feat;
     long* local_expert_count_ptr = local_expert_count.data_ptr<long>();
-    long* local_expert_compress_ptr = new long[num_chunks];
+    long* global_expert_count_ptr = global_expert_count.data_ptr<long>();
+    long* local_expert_compress_ptr = new long[n_workers];
+    long* global_expert_compress_ptr = new long[n_workers];
     long* local_compressed_offset_ptr = local_compressed_offset.data_ptr<long>();
+    long* global_compressed_offset_ptr = global_compressed_offset.data_ptr<long>();
     long local_com_offset = 0;
-    for (size_t i = 0; i < num_chunks; i++) {
-        local_expert_compress_ptr[i] = local_expert_count_ptr[i] * in_feat;
-        if (local_expert_count_ptr[i]) {
-          local_expert_compress_ptr[i] += 32;
+    long global_com_offset = 0;
+    for (size_t j = 0; j < n_workers; ++j) {
+      local_expert_compress_ptr[j] = 0;
+      global_expert_compress_ptr[j] = 0;
+      for (size_t i = 0; i < n_expert; i++) {
+        int idx = i + j * n_expert;
+        local_expert_compress_ptr[j] += local_expert_count_ptr[idx] * in_feat;
+        if (local_expert_count_ptr[idx]) {
+          local_expert_compress_ptr[j] += 32;
           local_com_offset += 32;
         }
-        local_compressed_offset_ptr[i] += local_com_offset;
+        global_expert_compress_ptr[j] += global_expert_count_ptr[idx] * in_feat;
+        if (global_expert_count_ptr[idx]) {
+          global_expert_compress_ptr[j] += 32;
+          global_com_offset += 32;
+        }
+        local_compressed_offset_ptr[idx] += local_com_offset;
+        global_compressed_offset_ptr[idx] += global_com_offset;
+      }
     }
     auto local_compressed = input_buf.new_empty({local_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
 
@@ -118,32 +144,45 @@ torch::Tensor _global_scatter(
 
     // global
     auto global_offset = global_expert_count.new_empty({num_chunks});
-    auto global_compressed_offset = global_offset.clone();
-    long* global_expert_count_ptr = global_expert_count.data_ptr<long>();
-    long* global_expert_compress_ptr = new long[num_chunks];
     long* global_offset_ptr = global_offset.data_ptr<long>();
-    long* global_compressed_offset_ptr = global_compressed_offset.data_ptr<long>();
     long pre_global_offset = 0;
-    long pre_global_com_offset = 0;
     int global_idx = 0;
     for (size_t i = 0; i < n_expert; ++i) {
       for (size_t j = 0; j < n_workers; ++j) {
         int idx = i + j * n_expert;
-        global_expert_compress_ptr[idx] = global_expert_count_ptr[idx] * in_feat;
-        if (global_expert_count_ptr[idx]) {
-          global_expert_compress_ptr[idx] += 32;
-        }
-
         global_offset_ptr[global_idx] = global_expert_count_ptr[idx] * in_feat + pre_global_offset;
-        global_compressed_offset_ptr[global_idx] = global_expert_compress_ptr[idx] + pre_global_com_offset;
-
         pre_global_offset = global_offset_ptr[global_idx];
-        pre_global_com_offset = global_compressed_offset_ptr[global_idx];
         global_idx++;
       }
     }
 
     auto global_compressed = input_buf.new_empty({global_compressed_offset_ptr[num_chunks - 1]}, at::ScalarType::Byte);
+    //int rank = -1;
+    //ncclCommUserRank(smgr->ncclcomm, &rank);
+    //if (rank == 0) {
+    //  for (int i = 0; i < n_workers; i++) {
+    //    std::cout << "expert_compress: " << i << "_" << local_expert_compress_ptr[i] << "_" << global_expert_compress_ptr[i] << std::endl;
+
+    //  }
+    //  //std::cout << "local_compressed_offset: " << local_compress_offset << std::endl;
+    //  std::cout << "local_compressed_size: " << local_compressed.numel() 
+    //            << std::endl;
+
+    //}
+    //if (rank == 0) {
+    //  std::cout << "size:" << n_workers
+    //            << "_" << n_expert
+    //            << "_" << num_chunks
+    //            << "_" << global_max_chunk_size
+    //            << "_" << local_compressed.numel()
+    //            << "_" << global_compressed.numel()
+    //            << "_" << global_input_buf.numel()
+    //            << std::endl;
+    //  std::cout << "local_expert_count: " << local_expert_count << std::endl;
+    //  std::cout << "global_expert_count: " << global_expert_count << std::endl;
+    //  std::cout << "global_compressed_offset: " << global_compressed_offset << std::endl;
+    //  std::cout << "global_offset: " << global_offset << std::endl;
+    //}
 
     // alltoall
     AT_DISPATCH_INTEGRAL_TYPES(local_compressed.scalar_type(),
@@ -153,16 +192,26 @@ torch::Tensor _global_scatter(
             local_expert_compress_ptr,
             global_expert_compress_ptr,
             global_compressed.data_ptr<scalar_t>(),
-            1, n_expert, n_workers,
+            n_workers,
             smgr
         );
     }));
 
+
+    //if (rank == 0) {
+    //  std::cout << "scatter begin" << std::endl;
+    //}
+    //smgr->sync(1);
+    //if (rank == 0) {
+    //  std::cout << "scatter done" << std::endl;
+    //}
+
     // decompress
-    decompress_uint8_to_f16_host_vector(
+    decompress_uint8_to_f16_host_vector_exchange(
         global_compressed.data_ptr<uint8_t>(),
         global_max_chunk_size,
-        num_chunks,
+        n_workers,
+        n_expert,
         global_compressed_offset.cuda().data_ptr<long>(),
         global_input_buf.data_ptr<at::Half>(),
         global_offset.cuda().data_ptr<long>(),
