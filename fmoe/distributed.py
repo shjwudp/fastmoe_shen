@@ -6,6 +6,8 @@ import torch.nn as nn
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from .utils import get_torch_default_comm
 
+import bagua.torch_api as bagua
+
 
 class DistributedGroupedDataParallel(nn.Module):
     r"""
@@ -62,6 +64,7 @@ class DistributedGroupedDataParallel(nn.Module):
                     dp_comm = p.dp_comm
                 else:
                     dp_comm = "dp"
+                print("rank={}, dp_comm={}".format(bagua.get_rank(), dp_comm))
                 group_key = (dp_comm, p.dtype)
                 if group_key not in groups:
                     groups[group_key] = [p]
