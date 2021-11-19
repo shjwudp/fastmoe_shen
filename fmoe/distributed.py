@@ -57,6 +57,11 @@ class DistributedGroupedDataParallel(nn.Module):
         def allreduce_params(no_scale=False,
                 reduce_after=False, fp32_allreduce=False):
             groups = dict()
+
+            p_name = dict()
+            for n, p in self.module.named_parameters():
+                p_name[p] = n
+
             for p in self.module.parameters():
                 if not p.requires_grad or p.grad is None:
                     continue
@@ -64,7 +69,7 @@ class DistributedGroupedDataParallel(nn.Module):
                     dp_comm = p.dp_comm
                 else:
                     dp_comm = "dp"
-                print("rank={}, dp_comm={}".format(bagua.get_rank(), dp_comm))
+                print("rank={}, dp_comm={}, name={}".format(bagua.get_rank(), dp_comm, p_name[p]), flush=True)
                 group_key = (dp_comm, p.dtype)
                 if group_key not in groups:
                     groups[group_key] = [p]
